@@ -165,16 +165,15 @@ init.sparse.beta <- function(p, k) {
 
 
 
-plot.times.k <- function(n, p, k.original, k.test.list, reps) {
+plot.times.k <- function(n, p, k.true, k.test.list, reps) {
   stepi <- 1
+  results <- list()
   progress.bar <- txtProgressBar(min = 1, max = length(k.test.list), initial = 1) 
   df <- data.frame(algorithm=character(), k=integer(), time=double())
     
   for (k in k.test.list) {
-    mio.k.times <- c()
-    bs.k.times <- c()
     for (i in 1:reps) {
-      dat <- create.artif.data(n, p, k.original, noise.std = 0.2)
+      dat <- create.artif.data(n, p, k.true, noise.std = 0.2)
       mio.time <- system.time(mio.solve(dat$x, dat$y, k))["elapsed"]
       bs.time <- system.time(bs.fixed.k(dat$x, dat$y, k))["elapsed"]
       tmp.df <- data.frame(c('mio', 'bs'), c(k, k), c(mio.time, bs.time))
@@ -184,12 +183,68 @@ plot.times.k <- function(n, p, k.original, k.test.list, reps) {
     stepi <- stepi + 1
     setTxtProgressBar(progress.bar, stepi)
   }
-  p <- ggplot(df, aes(x=time, fill=algorithm)) +
+  results$p <- ggplot(df, aes(x=time, fill=algorithm)) +
     geom_density(alpha = 0.2) +
     facet_wrap(~k) +
-    title(paste0("n=", n, ", p=", p, ", k=", k.original))
-  return(p)
+    title(paste0("n=", n, ", p=", p, ", k_true=", k.true))
+  results$df <- df
+  return(results)
 }
+
+
+plot.times.n <- function(p, k.true, k, n.list, reps) {
+  stepi <- 1
+  results <- list()
+  progress.bar <- txtProgressBar(min = 1, max = length(n.list), initial = 1) 
+  df <- data.frame(algorithm=character(), n=integer(), time=double())
+  
+  for (n in n.list) {
+    for (i in 1:reps) {
+      dat <- create.artif.data(n, p, k.true, noise.std = 0.2)
+      mio.time <- system.time(mio.solve(dat$x, dat$y, k))["elapsed"]
+      bs.time <- system.time(bs.fixed.k(dat$x, dat$y, k))["elapsed"]
+      tmp.df <- data.frame(c('mio', 'bs'), c(n, n), c(mio.time, bs.time))
+      names(tmp.df) <- c('algorithm', 'n', 'time')    
+      df <- rbind(df, tmp.df)
+    }
+    stepi <- stepi + 1
+    setTxtProgressBar(progress.bar, stepi)
+  }
+  results$p <- ggplot(df, aes(x=time, fill=algorithm)) +
+    geom_density(alpha = 0.2) +
+    facet_wrap(~n) +
+    title(paste0("p=", p, ", k=", k, ", k_true=", k.true))
+  results$df <- df
+  return(results)
+}
+
+
+plot.times.p <- function(n, k.true, k, p.list, reps) {
+  stepi <- 1
+  results <- list()
+  progress.bar <- txtProgressBar(min = 1, max = length(p.list), initial = 1) 
+  df <- data.frame(algorithm=character(), p=integer(), time=double())
+  
+  for (p in p.list) {
+    for (i in 1:reps) {
+      dat <- create.artif.data(n, p, k.true, noise.std = 0.2)
+      mio.time <- system.time(mio.solve(dat$x, dat$y, k))["elapsed"]
+      bs.time <- system.time(bs.fixed.k(dat$x, dat$y, k))["elapsed"]
+      tmp.df <- data.frame(c('mio', 'bs'), c(p, p), c(mio.time, bs.time))
+      names(tmp.df) <- c('algorithm', 'p', 'time')    
+      df <- rbind(df, tmp.df)
+    }
+    stepi <- stepi + 1
+    setTxtProgressBar(progress.bar, stepi)
+  }
+  results$p <- ggplot(df, aes(x=time, fill=algorithm)) +
+    geom_density(alpha = 0.2) +
+    facet_wrap(~p) +
+    title(paste0("n=", n, ", k=", k, ", k_true=", k.true))
+  results$df <- df
+  return(results)
+}
+
 
 
 compare.solvers <- function(dat, k) {
