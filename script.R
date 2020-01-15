@@ -1,5 +1,6 @@
 library(gurobi)
 library(Matrix)
+library(ggplot2)
 
 
 best.sub.sel <- function(x, y, k_max, nruns=50, maxiter=1000, tol=1e-4, polish=TRUE, mio=TRUE, time.limit=100) {
@@ -93,10 +94,6 @@ bs.proj.grad <- function(x, y, k, L, beta0, nruns=50, maxiter=1000, tol=1e-4, po
 
 
 mio.solve <- function(x, y, k, xtx=NULL, warm.beta=NULL, time.limit=100) {
-  x <- dat$x
-  y <- dat$y
-  k <- 32
-  time.limit <- 100
   n <- nrow(x)
   p <- ncol(x)
   I <- diag(1, p, p)
@@ -163,98 +160,142 @@ init.sparse.beta <- function(p, k) {
 }
   
 
+custom.labeller <- function(variable, value){
+  return(paste0(variable, '=', value))
+}
 
 
-plot.times.k <- function(n, p, k.true, k.test.list, reps) {
+
+plot.times.k <- function(n, p, k.true, k.test.list, reps, time.limit=200) {
+  if (length(time.limit) == 1) {
+    time.limit <- rep(time.limit, length(k.test.list))
+  }
   stepi <- 1
   results <- list()
   progress.bar <- txtProgressBar(min = 1, max = length(k.test.list), initial = 1) 
   df <- data.frame(algorithm=character(), k=integer(), time=double())
-    
-  for (k in k.test.list) {
+  ratios <- data.frame(k=integer(), ratio=double())  
+  
+  for (j in 1:length(k.test.list)) {
+    k <- k.test.list[j]
+    tl <- time.limit[j]
+    k.ratios <- c()
     for (i in 1:reps) {
       dat <- create.artif.data(n, p, k.true, noise.std = 0.2)
-      mio.time <- system.time(mio.solve(dat$x, dat$y, k))["elapsed"]
-      bs.time <- system.time(bs.fixed.k(dat$x, dat$y, k))["elapsed"]
+      mio.time <- system.time(mio.solve(dat$x, dat$y, k, time.limit=tl))["elapsed"]
+      bs.time <- system.time(bs.fixed.k(dat$x, dat$y, k, time.limit=tl))["elapsed"]
       tmp.df <- data.frame(c('mio', 'bs'), c(k, k), c(mio.time, bs.time))
       names(tmp.df) <- c('algorithm', 'k', 'time')    
       df <- rbind(df, tmp.df)
+      k.ratios <- c(k.ratios, bs.time / mio.time)
     }
+    tmp.ratio.df <- data.frame(k, mean(k.ratios))
+    names(tmp.ratio.df) <- c('k', 'ratio')    
+    ratios <- rbind(ratios, tmp.ratio.df)
+    
     stepi <- stepi + 1
     setTxtProgressBar(progress.bar, stepi)
   }
   results$p <- ggplot(df, aes(x=time, fill=algorithm)) +
     geom_density(alpha = 0.2) +
-    facet_wrap(~k) +
-    title(paste0("n=", n, ", p=", p, ", k_true=", k.true))
+    facet_wrap(~k, scales='free', labeller=custom.labeller) +
+    ggtitle(paste0("n=", n, ", p=", p, ", k_true=", k.true)) +
+    theme(plot.title = element_text(hjust = 0.5))
+  
   results$df <- df
+  results$ratios <- ratios
   return(results)
 }
 
 
-plot.times.n <- function(p, k.true, k, n.list, reps) {
+plot.times.n <- function(p, k.true, k, n.list, reps, time.limit=200) {
+  if (length(time.limit) == 1) {
+    time.limit <- rep(time.limit, length(n.list))
+  }
   stepi <- 1
   results <- list()
   progress.bar <- txtProgressBar(min = 1, max = length(n.list), initial = 1) 
   df <- data.frame(algorithm=character(), n=integer(), time=double())
+  ratios <- data.frame(n=integer(), ratio=double())  
   
-  for (n in n.list) {
+  for (j in 1:length(n.list)) {
+    n <- n.list[j]
+    tl <- time.limit[j]
+    n.ratios <- c()
     for (i in 1:reps) {
       dat <- create.artif.data(n, p, k.true, noise.std = 0.2)
-      mio.time <- system.time(mio.solve(dat$x, dat$y, k))["elapsed"]
-      bs.time <- system.time(bs.fixed.k(dat$x, dat$y, k))["elapsed"]
+      mio.time <- system.time(mio.solve(dat$x, dat$y, k, time.limit=tl))["elapsed"]
+      bs.time <- system.time(bs.fixed.k(dat$x, dat$y, k, time.limit=tl))["elapsed"]
       tmp.df <- data.frame(c('mio', 'bs'), c(n, n), c(mio.time, bs.time))
       names(tmp.df) <- c('algorithm', 'n', 'time')    
       df <- rbind(df, tmp.df)
+      n.ratios <- c(n.ratios, bs.time / mio.time)
     }
+    tmp.ratio.df <- data.frame(n, mean(n.ratios))
+    names(tmp.ratio.df) <- c('n', 'ratio')    
+    ratios <- rbind(ratios, tmp.ratio.df)
+    
     stepi <- stepi + 1
     setTxtProgressBar(progress.bar, stepi)
   }
   results$p <- ggplot(df, aes(x=time, fill=algorithm)) +
     geom_density(alpha = 0.2) +
-    facet_wrap(~n) +
-    title(paste0("p=", p, ", k=", k, ", k_true=", k.true))
+    facet_wrap(~n, scales='free', labeller=custom.labeller) +
+    ggtitle(paste0("p=", p, ", k=", k, ", k_true=", k.true)) +
+    theme(plot.title = element_text(hjust = 0.5))
+  
   results$df <- df
+  results$ratios <- ratios
   return(results)
 }
 
 
-plot.times.p <- function(n, k.true, k, p.list, reps) {
+plot.times.p <- function(n, k.true, k, p.list, reps, time.limit=200) {
   stepi <- 1
   results <- list()
   progress.bar <- txtProgressBar(min = 1, max = length(p.list), initial = 1) 
   df <- data.frame(algorithm=character(), p=integer(), time=double())
+  ratios <- data.frame(p=integer(), ratio=double())  
   
-  for (p in p.list) {
+  for (j in 1:length(p.list)) {
+    p <- p.list[j]
+    tl <- time.limit[j]
+    p.ratios <- c()
     for (i in 1:reps) {
       dat <- create.artif.data(n, p, k.true, noise.std = 0.2)
-      mio.time <- system.time(mio.solve(dat$x, dat$y, k))["elapsed"]
-      bs.time <- system.time(bs.fixed.k(dat$x, dat$y, k))["elapsed"]
+      mio.time <- system.time(mio.solve(dat$x, dat$y, k, time.limit=tl))["elapsed"]
+      bs.time <- system.time(bs.fixed.k(dat$x, dat$y, k, time.limit=tl))["elapsed"]
       tmp.df <- data.frame(c('mio', 'bs'), c(p, p), c(mio.time, bs.time))
       names(tmp.df) <- c('algorithm', 'p', 'time')    
       df <- rbind(df, tmp.df)
+      p.ratios <- c(p.ratios, bs.time / mio.time)
     }
+    tmp.ratio.df <- data.frame(p, mean(p.ratios))
+    names(tmp.ratio.df) <- c('p', 'ratio')    
+    ratios <- rbind(ratios, tmp.ratio.df)
+    
     stepi <- stepi + 1
     setTxtProgressBar(progress.bar, stepi)
   }
   results$p <- ggplot(df, aes(x=time, fill=algorithm)) +
     geom_density(alpha = 0.2) +
-    facet_wrap(~p) +
-    title(paste0("n=", n, ", k=", k, ", k_true=", k.true))
+    facet_wrap(~p, scales='free', labeller=custom.labeller) +
+    ggtitle(paste0("n=", n, ", k=", k, ", k_true=", k.true)) +
+    theme(plot.title = element_text(hjust = 0.5))
+  
   results$df <- df
+  results$ratios <- ratios
   return(results)
 }
 
 
 
 compare.solvers <- function(dat, k) {
-  start <- Sys.time()
-  mio.result <- mio.solve(dat$x, dat$y, k, time.limit = 100)
-  print(paste0('MIO: ', Sys.time() - start))
+  mio.result <- system.time(mio.solve(dat$x, dat$y, k, time.limit = 3600))
+  print(paste0('MIO: ', mio.result['elapsed']))
   
-  start <- Sys.time()
-  bs.result <- system.time(bs.fixed.k(dat$x, dat$y, k, time.limit = 100))
-  print(paste0('BS: ', Sys.time() - start))
+  bs.result <- system.time(bs.fixed.k(dat$x, dat$y, k, time.limit = 3600))
+  print(paste0('BS: ', bs.result['elapsed']))
   results <- list()
   results$mio <- mio.result
   results$bs <- bs.result
@@ -274,10 +315,23 @@ create.artif.data <- function(n, p, k, noise.std=0.1) {
 }
 
 
-p <- plot.times.k(350, 100, 32, c(2, 10, 32, 60 ), reps=50)
+res.k <- plot.times.k(500, 200, 32, c(5, 20, 32, 64), reps=50, time.limit=200)
+ggsave("times_k.png", plot = res.k$p)
 
-# dat <- create.artif.data(n=350, p=200, k=32, noise.std=0.2)
-# res <- compare.solvers(dat, 20)
+res.n <- plot.times.n(200, 32, 20, c(250, 500, 2000, 10000), reps=50, time.limit=200)
+ggsave("times_n.png", plot = res.n$p)
+
+res.p <- plot.times.p(1000, 32, 20, c(50, 100, 200, 250), reps=20, time.limit=c(200, 200, 200, 500))
+ggsave("times_.png", plot = res.p$p)
+
+
+
+dat <- create.artif.data(n=1000, p=500, k=32, noise.std=0.2)
+res <- compare.solvers(dat, 20)
+
+# n=1000, p=500, k=32, k.test=20, noise.std=0.2
+# [1] "MIO: 3600.43"
+# [1] "BS: 704.529999999999"
 
 # length(res$mio[which(res$mio != 0, arr.ind = TRUE)])
 # res$bs[which(res$bs != 0, arr.ind = TRUE)]
