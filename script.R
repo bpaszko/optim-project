@@ -158,7 +158,7 @@ init.sparse.beta <- function(p, k) {
   beta[-ids[1:k]] <- 0
   return(beta)
 }
-  
+
 
 custom.labeller <- function(variable, value){
   return(paste0(variable, '=', value))
@@ -345,4 +345,49 @@ res <- compare.solvers(dat, 20)
 
 # results <- best.sub.sel(x, y, 6, polish=TRUE)
 # mio.solve(x, y, 4)
+
+
+# ------------- diabetes ---------------------
+
+
+setwd("C:\\Users\\kspalinska\\Documents\\Studia\\MOPT\\optim-project")
+
+# rzeczywiste zbiory danych
+
+data <- read.csv(file="diabetes.csv", header=TRUE, sep=",")
+y <- data[,c("y")]
+x <- data[,-11]
+
+x_m <- data.matrix(x)
+x_m <- cbind(x_m, rep(1, 442)) 
+y_m <- data.matrix(y)
+
+
+df_diabetes <- data.frame(algorithm=character(), k=integer(), time=double())
+
+for (i in seq(2, 64, by = 2)) {
+  start.time <- Sys.time()
+  bs.fixed.k(x_m, y_m, i, mio=FALSE)
+  end.time <- Sys.time()
+  time.taken_warm <- end.time - start.time
+  time.taken_warm <- as.numeric(time.taken_warm, units = "secs")
+  start.time <- Sys.time()
+  bs.fixed.k(x_m, y_m, i, mio=TRUE)
+  end.time <- Sys.time()
+  time.taken_bs <- end.time - start.time
+  time.taken_bs <- as.numeric(time.taken_bs, units = "secs", time.limit=600)
+  start.time <- Sys.time()
+  mio.solve(x_m, y_m, i)
+  end.time <- Sys.time()
+  time.taken_mio <- end.time - start.time
+  time.taken_mio <- as.numeric(time.taken_mio, units = "secs", time.limit=600)
+  tmp.df <- data.frame(c('mio', 'bs', 'warm'), c(i,i,i), c(time.taken_mio,time.taken_bs,time.taken_warm))
+  names(tmp.df) <- c('algorithm', 'k', 'time (sec)')
+  df_diabetes <- rbind(df_diabetes, tmp.df)
+}
+
+# wykres
+ggplot(df_diabetes) + geom_line(aes(p, acc, color = algorithm))
+
+
 
