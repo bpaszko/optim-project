@@ -1,6 +1,8 @@
 library(gurobi)
 library(Matrix)
 library(ggplot2)
+library(broom)
+library(dplyr)
 
 
 best.sub.sel <- function(x, y, k_max, nruns=50, maxiter=1000, tol=1e-4, polish=TRUE, mio=TRUE, time.limit=100) {
@@ -107,7 +109,7 @@ mio.solve <- function(x, y, k, xtx=NULL, warm.beta=NULL, time.limit=100) {
     y <- y / y_norm
     xtx <- crossprod(x)
     mu <- max(abs(xtx[row(xtx) != col(xtx)]))
-    nk <- max(1 - mu * (k-1), 1e-4)
+    nk <- max(1 - mu * (k-1), 1e-2)
     bigm.u <- min(sqrt(sum(order((t(x)%*%y)^2, decreasing=TRUE)[1:k]))/nk, sqrt((t(y)%*%y)/nk))
     # bigm.l <- sum((order(abs(t(x)%*%y), decreasing=TRUE)[1:k]))/(1-((k-1)*mu))
   }
@@ -347,21 +349,49 @@ res <- compare.solvers(dat, 20)
 # mio.solve(x, y, 4)
 
 
+
 # ------------- diabetes ---------------------
 
 
 setwd("C:\\Users\\kspalinska\\Documents\\Studia\\MOPT\\optim-project")
 
-# rzeczywiste zbiory danych
+# rzeczywisty zbior danych
 
 data <- read.csv(file="diabetes.csv", header=TRUE, sep=",")
 y <- data[,c("y")]
 x <- data[,-11]
 
 x_m <- data.matrix(x)
-x_m <- cbind(x_m, rep(1, 442)) 
+x_m <- cbind(rep(1, 442), x_m) 
 y_m <- data.matrix(y)
 
+mio_results <- mio.solve(x_m, y_m, 64)
+bs_results <- bs.fixed.k(x_m, y_m, 64)
+
+m <- lm(y ~ ., data = x) 
+#summary(m)
+#tidy(m)
+lm_results <- m$coefficients
+
+lm_mio <- rbind(lm_results,mio_results)
+barplot(lm_mio[,-1],beside=T, col=c("#3F97D0", "deeppink2"), main="Regression Coefficients")
+
+lm_bs <-  rbind(lm_results,bs_results)
+barplot(lm_bs[,-1],beside=T, col=c("#3F97D0", "deeppink2"), main="Regression Coefficients")
+
+legend(legend = c("lm", "bs"), fill = c( "#3F97D0", "deeppink2"), 
+       "topright", horiz=TRUE)
+
+
+mse<-function(x_hat,x) rowMeans((x_hat-x)^2)
+
+mse_means_mio <- mse(data.matrix(mio_results),data.matrix(lm_results))
+mse_means_bs <- mse(data.matrix(bs_results),data.matrix(lm_results))
+
+mse_mio <- sum(as.vector(mse_means_mio), na.rm = TRUE)
+mse_bs <- sum(as.vector(mse_means_bs), na.rm = TRUE)
+
+# ------------- diabetes times ------------
 
 df_diabetes <- data.frame(algorithm=character(), k=integer(), time=double())
 
@@ -375,19 +405,153 @@ for (i in seq(2, 64, by = 2)) {
   bs.fixed.k(x_m, y_m, i, mio=TRUE)
   end.time <- Sys.time()
   time.taken_bs <- end.time - start.time
-  time.taken_bs <- as.numeric(time.taken_bs, units = "secs", time.limit=600)
+  time.taken_bs <- as.numeric(time.taken_bs, units = "secs", time.limit=1000)
   start.time <- Sys.time()
   mio.solve(x_m, y_m, i)
   end.time <- Sys.time()
   time.taken_mio <- end.time - start.time
-  time.taken_mio <- as.numeric(time.taken_mio, units = "secs", time.limit=600)
+  time.taken_mio <- as.numeric(time.taken_mio, units = "secs", time.limit=1000)
   tmp.df <- data.frame(c('mio', 'bs', 'warm'), c(i,i,i), c(time.taken_mio,time.taken_bs,time.taken_warm))
   names(tmp.df) <- c('algorithm', 'k', 'time (sec)')
   df_diabetes <- rbind(df_diabetes, tmp.df)
 }
 
 # wykres
-ggplot(df_diabetes) + geom_line(aes(p, acc, color = algorithm))
+ggplot(df_diabetes[-34,]) + geom_line(aes(k, time, colour = algorithm), size=1)
+
+# ---------------- accuracy experiments ---------------------
+
+compute.acc <- function(betas, active.set) {
+  ids <- which(betas != 0, arr.ind = TRUE)
+  print(ids)
+  acc <- length(intersect(ids, active.set)) / length(active.set)
+  return(acc)
+}
 
 
+correctness.k <- function(n, p, k.true, k.test.list, reps, time.limit=200) {
+  if (length(time.limit) == 1) {
+    time.limit <- rep(time.limit, length(k.test.list))
+  }
+  stepi <- 1
+  progress.bar <- txtProgressBar(min = 1, max = length(k.test.list), initial = 1)
+  df <- data.frame(algorithm=character(), k=integer(), time=double())
+  
+  for (j in 1:length(k.test.list)) {
+    k <- k.test.list[j]
+    tl <- time.limit[j]
+    best.acc <- ifelse(k >= k.true, 1, k / k.true)
+    for (i in 1:reps) {
+      dat <- create.artif.data(n, p, k.true, noise.std = 0.2)
+      mio.beta <- mio.solve(dat$x, dat$y, k, time.limit=tl)
+      bs.beta <- bs.fixed.k(dat$x, dat$y, k, time.limit=tl)
+      warm.beta <- bs.fixed.k(dat$x, dat$y, k, mio=F)
+      mio.acc <- compute.acc(mio.beta, dat$active.set)
+      bs.acc <- compute.acc(bs.beta, dat$active.set)
+      warm.acc <- compute.acc(warm.beta, dat$active.set)
+      
+      tmp.df <- data.frame(c('mio', 'bs', 'warm', 'best'), c(k, k, k, k), c(mio.acc, bs.acc, warm.acc, best.acc))
+      names(tmp.df) <- c('algorithm', 'k', 'acc')
+      df <- rbind(df, tmp.df)
+    }
+    stepi <- stepi + 1
+    setTxtProgressBar(progress.bar, stepi)
+  }
+  return(df)
+}
 
+
+correctness.n <- function(p, k.true, k, n.list, reps, time.limit=200) {
+  if (length(time.limit) == 1) {
+    time.limit <- rep(time.limit, length(n.list))
+  }
+  stepi <- 1
+  progress.bar <- txtProgressBar(min = 1, max = length(n.list), initial = 1)
+  df <- data.frame(algorithm=character(), n=integer(), time=double())
+  best.acc <- ifelse(k >= k.true, 1, k / k.true)
+  for (j in 1:length(n.list)) {
+    n <- n.list[j]
+    tl <- time.limit[j]
+    for (i in 1:reps) {
+      dat <- create.artif.data(n, p, k.true, noise.std = 0.2)
+      mio.beta <- mio.solve(dat$x, dat$y, k, time.limit=tl)
+      bs.beta <- bs.fixed.k(dat$x, dat$y, k, time.limit=tl)
+      warm.beta <- bs.fixed.k(dat$x, dat$y, k, mio=F)
+      mio.acc <- compute.acc(mio.beta, dat$active.set)
+      bs.acc <- compute.acc(bs.beta, dat$active.set)
+      warm.acc <- compute.acc(warm.beta, dat$active.set)
+      
+      tmp.df <- data.frame(c('mio', 'bs', 'warm', 'best'), c(n, n, n, n), c(mio.acc, bs.acc, warm.acc, best.acc))
+      names(tmp.df) <- c('algorithm', 'n', 'acc')
+      df <- rbind(df, tmp.df)
+    }
+    stepi <- stepi + 1
+    setTxtProgressBar(progress.bar, stepi)
+  }
+  return(df)
+}
+
+
+correctness.p <- function(n, k.true, k, p.list, reps, time.limit=200) {
+  stepi <- 1
+  progress.bar <- txtProgressBar(min = 1, max = length(p.list), initial = 1)
+  df <- data.frame(algorithm=character(), p=integer(), time=double())
+  best.acc <- ifelse(k >= k.true, 1, k / k.true)
+  for (j in 1:length(p.list)) {
+    p <- p.list[j]
+    tl <- time.limit[j]
+    for (i in 1:reps) {
+      dat <- create.artif.data(n, p, k.true, noise.std = 0.2)
+      mio.beta <- mio.solve(dat$x, dat$y, k, time.limit=tl)
+      bs.beta <- bs.fixed.k(dat$x, dat$y, k, time.limit=tl)
+      warm.beta <- bs.fixed.k(dat$x, dat$y, k, mio=F)
+      mio.acc <- compute.acc(mio.beta, dat$active.set)
+      bs.acc <- compute.acc(bs.beta, dat$active.set)
+      warm.acc <- compute.acc(warm.beta, dat$active.set)
+      
+      tmp.df <- data.frame(c('mio', 'bs', 'warm', 'best'), c(p,p,p,p), c(mio.acc, bs.acc, warm.acc, best.acc))
+      names(tmp.df) <- c('algorithm', 'p', 'acc')
+      df <- rbind(df, tmp.df)
+    }
+    stepi <- stepi + 1
+    setTxtProgressBar(progress.bar, stepi)
+  }
+  return(df)
+}
+
+correctness.snr <- function(n, p, k.true, k, s.list, reps, time.limit=200) {
+  stepi <- 1
+  progress.bar <- txtProgressBar(min = 1, max = length(s.list), initial = 1)
+  df <- data.frame(algorithm=character(), s=integer(), time=double())
+  best.acc <- ifelse(k >= k.true, 1, k / k.true)
+  for (j in 1:length(s.list)) {
+    s <- s.list[j]
+    tl <- time.limit[j]
+    for (i in 1:reps) {
+      dat <- create.artif.data(n, p, k.true, noise.std = s)
+      mio.beta <- mio.solve(dat$x, dat$y, k, time.limit=tl)
+      bs.beta <- bs.fixed.k(dat$x, dat$y, k, time.limit=tl)
+      warm.beta <- bs.fixed.k(dat$x, dat$y, k, mio=F)
+      mio.acc <- compute.acc(mio.beta, dat$active.set)
+      bs.acc <- compute.acc(bs.beta, dat$active.set)
+      warm.acc <- compute.acc(warm.beta, dat$active.set)
+      
+      tmp.df <- data.frame(c('mio', 'bs', 'warm', 'best'), c(s,s,s,s), c(mio.acc, bs.acc, warm.acc, best.acc))
+      names(tmp.df) <- c('algorithm', 'p', 'acc')
+      df <- rbind(df, tmp.df)
+    }
+    stepi <- stepi + 1
+    setTxtProgressBar(progress.bar, stepi)
+  }
+  return(df)
+}
+
+
+res.k <- correctness.k(500, 200, 32, c(5, 20, 32, 64), reps=5, time.limit=600)
+res.n <- correctness.n(200, 32, 20, c(250, 500, 2000, 10000), reps=5, time.limit=600)
+res.p <- correctness.p(1000, 32, 20, c(50, 100, 200, 250), reps=5, time.limit=c(600, 600, 600, 500))
+res.snr <- correctness.snr(1000, 200, 32, 20, c(0.1, 0.3, 0.5, 0.7, 0.9), reps=20)
+
+res.p %>% group_by(p, algorithm) %>% summarise(m = mean(acc))
+res.k %>% group_by(k, algorithm) %>% summarise(m = mean(acc))
+res.n %>% group_by(n, algorithm) %>% summarise(m = mean(acc))
